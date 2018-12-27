@@ -7,6 +7,8 @@ import com.sun.net.httpserver.HttpHandler;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.HttpCookie;
+import java.util.Optional;
 
 public class WelcomeHandler implements HttpHandler {
     private DAOLogin daoLogin;
@@ -24,8 +26,14 @@ public class WelcomeHandler implements HttpHandler {
     @Override
     public void handle(HttpExchange httpExchange) throws IOException {
         this.httpExchange = httpExchange;
+        String method = httpExchange.getRequestMethod();
         resetFields();
-        handleRequestGET();
+        Optional<HttpCookie> cookie = cookieHelper.getSessionIdCookie(httpExchange);
+        String sessionId = cookie.get().getValue();
+        sessionId = sessionId.replace("\"", "");
+        if(method.equals("GET")) {
+            handleRequestGET(sessionId);
+        }
         sendExchange();
     }
 
@@ -35,12 +43,16 @@ public class WelcomeHandler implements HttpHandler {
         this.code = 404;
     }
 
-    private void handleRequestGET(){
-        this.response = "<html><head></head><body>" +
-                "<h> Welcome </h>" +
-                "</body></html>";
-        this.code = 200;
-        this.location = "/welcome";
+    private void handleRequestGET(String sessionId){
+        if(daoLogin.getAccountBySessionId(sessionId) != null) {
+            this.response = "<html><head></head><body>" +
+                    "<h> Welcome </h>" +
+                    "</body></html>";
+            this.code = 200;
+            this.location = "/welcome";
+        } else {
+            this.code = 303;
+        }
     }
 
     private void sendExchange() throws IOException{
