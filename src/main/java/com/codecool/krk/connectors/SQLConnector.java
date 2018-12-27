@@ -1,4 +1,4 @@
-package com.codecool.krk;
+package com.codecool.krk.connectors;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
