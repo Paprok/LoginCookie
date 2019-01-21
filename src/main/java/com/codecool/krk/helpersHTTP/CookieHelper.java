@@ -45,4 +45,10 @@ public class CookieHelper {
         }
         return Optional.empty();
     }
+
+    public String getSessionId(Optional<HttpCookie> cookie) {
+        String sessionId = cookie.get().getValue();
+        sessionId = sessionId.replace("\"","");
+        return sessionId;
+    }
 }

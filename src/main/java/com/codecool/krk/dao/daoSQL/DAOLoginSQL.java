@@ -3,10 +3,7 @@ package com.codecool.krk.dao.daoSQL;
 import com.codecool.krk.dao.DAOLogin;
 import com.codecool.krk.model.Account;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import java.sql.*;
 import java.util.NoSuchElementException;
 
 public class DAOLoginSQL implements DAOLogin {
@@ -58,7 +55,11 @@ public class DAOLoginSQL implements DAOLogin {
             PreparedStatement ps = connection.prepareStatement(sql);
             ps.setString(1, newAccount.getName());
             ps.setString(2, newAccount.getPassword());
-            ps.setString(3, newAccount.getSession_id());
+            if(newAccount.getSession_id() == null ){
+                ps.setNull(3, Types.VARCHAR);
+            } else {
+                ps.setString(3, newAccount.getSession_id());
+            }
             ps.setInt(4, id);
             ps.execute();
             ps.close();

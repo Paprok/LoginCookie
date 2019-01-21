@@ -5,9 +5,9 @@ import com.codecool.krk.helpersHTTP.CookieHelper;
 import com.codecool.krk.model.Account;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
+import com.sun.xml.internal.ws.policy.privateutil.PolicyUtils;
 
 import java.io.*;
-import java.net.CookieHandler;
 import java.net.HttpCookie;
 import java.net.URLDecoder;
 import java.util.*;
@@ -30,14 +30,7 @@ public class LoginHandler implements HttpHandler {
         String method = httpExchange.getRequestMethod();
         resetFields();
         this.httpExchange = httpExchange;
-        if (method.equals("GET")){
-            handleRequestGET();
-        }
-
-        else if (method.equals("POST")){
-            handleRequestPOST();
-        }
-        sendExchange();
+        routeByMethodType(method);
     }
 
     private void resetFields() {
@@ -46,7 +39,37 @@ public class LoginHandler implements HttpHandler {
         this.code = 404;
     }
 
-    private void handleRequestGET(){
+    private void routeByMethodType(String method) throws IOException {
+        if (method.equals("GET")) {
+            handleRequestGET();
+        } else if (method.equals("POST")) {
+            handleRequestPOST();
+            sendExchange();
+        }
+    }
+
+    private void handleRequestGET() throws IOException{
+        Optional<HttpCookie> cookie = this.cookieHelper.getSessionIdCookie(this.httpExchange);
+        if (cookie.isPresent()) {
+            handlePresentCookie(cookie);
+        } else {
+            sendResponseGet();
+        }
+    }
+
+    private void handlePresentCookie(Optional<HttpCookie> cookie) throws IOException {
+        String sessionId = this.cookieHelper.getSessionId(cookie);
+        try {
+            Account account = daoLogin.getAccountBySessionId(sessionId);
+            this.location = "/welcome";
+            this.code = 303;
+            redirect();
+        } catch (NoSuchElementException e){
+            sendResponseGet();
+        }
+    }
+
+    private void sendResponseGet() throws IOException {
         this.response = "<html><head></head><body>" +
                 "<form method=\"POST\" >\n " +
                 "  Login:<br>\n" +
@@ -59,9 +82,10 @@ public class LoginHandler implements HttpHandler {
                 "</form> " +
                 "</body></html>";
         this.code = 200;
+        sendExchange();
     }
 
-    private void handleRequestPOST() throws IOException{
+    private void handleRequestPOST() throws IOException {
         InputStreamReader isr = new InputStreamReader(httpExchange.getRequestBody(), "utf-8");
         BufferedReader br = new BufferedReader(isr);
         String formData = br.readLine();
@@ -71,16 +95,16 @@ public class LoginHandler implements HttpHandler {
         String password = (String) inputs.get("password");
         System.out.println(name + " " + password);
 
-        try{
+        try {
             Account account = daoLogin.getAccountByNicknameAndPassword(name, password);
             handleValidUser(account);
 
-        } catch (NoSuchElementException e){
+        } catch (NoSuchElementException e) {
             handleInvalidUser();
         }
     }
 
-    private void handleValidUser(Account account){
+    private void handleValidUser(Account account) {
         String sessionId = UUID.randomUUID().toString();
         account.setSession_id(sessionId);
         daoLogin.updateAccount(account.getUser_id(), account);
@@ -103,7 +127,7 @@ public class LoginHandler implements HttpHandler {
     private static Map<String, String> parseFormData(String formData) throws UnsupportedEncodingException {
         Map<String, String> map = new HashMap<>();
         String[] pairs = formData.split("&");
-        for(String pair : pairs){
+        for (String pair : pairs) {
             String[] keyValue = pair.split("=");
             // We have to decode the value because it's urlencoded. see: https://en.wikipedia.org/wiki/POST_(HTTP)#Use_for_submitting_web_forms
             String value = new URLDecoder().decode(keyValue[1], "UTF-8");
@@ -112,11 +136,16 @@ public class LoginHandler implements HttpHandler {
         return map;
     }
 
-    private void sendExchange() throws IOException{
+    private void sendExchange() throws IOException {
         this.httpExchange.getResponseHeaders().add("Location", this.location);
         this.httpExchange.sendResponseHeaders(this.code, this.response.length());
         OutputStream os = this.httpExchange.getResponseBody();
         os.write(this.response.getBytes());
         os.close();
+    }
+
+    private void redirect() throws IOException {
+        this.httpExchange.getResponseHeaders().add("Location", this.location);
+        this.httpExchange.sendResponseHeaders(303, 0);
     }
 }
