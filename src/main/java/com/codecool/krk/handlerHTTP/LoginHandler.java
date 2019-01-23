@@ -13,12 +13,11 @@ import java.net.URLDecoder;
 import java.util.*;
 
 public class LoginHandler implements HttpHandler {
+    private final String LOGIN_LOCATION = "/";
     private DAOLogin daoLogin;
     private CookieHelper cookieHelper;
-    private HttpExchange httpExchange;
-    private String response;
-    private String location;
-    private int code;
+    private final String WELCOME_PAGE_LOCATION = "/welcome";
+
 
     public LoginHandler(DAOLogin daoLogin, CookieHelper cookieHelper) {
         this.daoLogin = daoLogin;
@@ -28,49 +27,40 @@ public class LoginHandler implements HttpHandler {
     @Override
     public void handle(HttpExchange httpExchange) throws IOException {
         String method = httpExchange.getRequestMethod();
-        resetFields();
-        this.httpExchange = httpExchange;
-        routeByMethodType(method);
+        routeByMethodType(method, httpExchange);
     }
 
-    private void resetFields() {
-        this.response = "";
-        this.location = "/";
-        this.code = 404;
-    }
 
-    private void routeByMethodType(String method) throws IOException {
+
+    private void routeByMethodType(String method, HttpExchange httpExchange) throws IOException {
         if (method.equals("GET")) {
-            handleRequestGET();
+            handleRequestGET(httpExchange);
         } else if (method.equals("POST")) {
-            handleRequestPOST();
-            sendExchange();
+            logBasedOnForm(httpExchange);
         }
     }
 
-    private void handleRequestGET() throws IOException{
-        Optional<HttpCookie> cookie = this.cookieHelper.getSessionIdCookie(this.httpExchange);
+    private void handleRequestGET(HttpExchange httpExchange) throws IOException {
+        Optional<HttpCookie> cookie = this.cookieHelper.getSessionIdCookie(httpExchange);
         if (cookie.isPresent()) {
-            handlePresentCookie(cookie);
+            handlePresentCookie(httpExchange, cookie);
         } else {
-            sendResponseGet();
+            sendLoginPage(httpExchange);
         }
     }
 
-    private void handlePresentCookie(Optional<HttpCookie> cookie) throws IOException {
+    private void handlePresentCookie(HttpExchange httpExchange, Optional<HttpCookie> cookie) throws IOException {
         String sessionId = this.cookieHelper.getSessionId(cookie);
         try {
             Account account = daoLogin.getAccountBySessionId(sessionId);
-            this.location = "/welcome";
-            this.code = 303;
-            redirect();
-        } catch (NoSuchElementException e){
-            sendResponseGet();
+            redirect(httpExchange, this.WELCOME_PAGE_LOCATION);
+        } catch (NoSuchElementException e) {
+            sendLoginPage(httpExchange);
         }
     }
 
-    private void sendResponseGet() throws IOException {
-        this.response = "<html><head></head><body>" +
+    private void sendLoginPage(HttpExchange httpExchange) throws IOException {
+        String response = "<html><head></head><body>" +
                 "<form method=\"POST\" >\n " +
                 "  Login:<br>\n" +
                 "  <input type=\"text\" name=\"name\" value=\"admin\">\n" +
@@ -81,46 +71,50 @@ public class LoginHandler implements HttpHandler {
                 "  <input type=\"submit\" value=\"Submit\">\n" +
                 "</form> " +
                 "</body></html>";
-        this.code = 200;
-        sendExchange();
+        int code = 200;
+        sendExchange(httpExchange, code, response);
     }
 
-    private void handleRequestPOST() throws IOException {
-        InputStreamReader isr = new InputStreamReader(httpExchange.getRequestBody(), "utf-8");
-        BufferedReader br = new BufferedReader(isr);
-        String formData = br.readLine();
-        System.out.println(formData);
-        Map inputs = parseFormData(formData);
-        String name = (String) inputs.get("name");
-        String password = (String) inputs.get("password");
-        System.out.println(name + " " + password);
+    private void logBasedOnForm(HttpExchange httpExchange) throws IOException {
+        Map<String, String> inputs = getParsedData(httpExchange);
+        String name = inputs.get("name");
+        String password = inputs.get("password");
 
         try {
             Account account = daoLogin.getAccountByNicknameAndPassword(name, password);
-            handleValidUser(account);
-
+            handleValidUser(httpExchange, account);
         } catch (NoSuchElementException e) {
-            handleInvalidUser();
+            handleInvalidUser(httpExchange);
         }
     }
 
-    private void handleValidUser(Account account) {
+    private Map<String, String> getParsedData(HttpExchange httpExchange) throws IOException {
+        String formData = getFormData(httpExchange);
+        System.out.println(formData);
+        return parseFormData(formData);
+    }
+
+    private String getFormData(HttpExchange httpExchange) throws IOException {
+        InputStreamReader isr = new InputStreamReader(httpExchange.getRequestBody(), "utf-8");
+        BufferedReader br = new BufferedReader(isr);
+        return br.readLine();
+    }
+
+    private void handleValidUser(HttpExchange httpExchange, Account account) throws  IOException{
         String sessionId = UUID.randomUUID().toString();
         account.setSession_id(sessionId);
         daoLogin.updateAccount(account.getUser_id(), account);
-        createCookie(sessionId);
-        this.location = "/welcome";
-        this.code = 303;
+        createCookie(sessionId, httpExchange);
+        redirect(httpExchange, WELCOME_PAGE_LOCATION);
     }
 
-    private void createCookie(String sessionId) {
+    private void createCookie(String sessionId, HttpExchange httpExchange) {
         Optional<HttpCookie> cookie = Optional.of(new HttpCookie(cookieHelper.getSESSION_COOKIE_NAME(), sessionId));
         httpExchange.getResponseHeaders().add("Set-Cookie", cookie.get().toString());
     }
 
-    private void handleInvalidUser() {
-        this.code = 303;
-        this.location = "/";
+    private void handleInvalidUser(HttpExchange httpExchange) throws IOException {
+        redirect(httpExchange, LOGIN_LOCATION);
         System.out.println("Wrong login credentials");
     }
 
@@ -136,16 +130,15 @@ public class LoginHandler implements HttpHandler {
         return map;
     }
 
-    private void sendExchange() throws IOException {
-        this.httpExchange.getResponseHeaders().add("Location", this.location);
-        this.httpExchange.sendResponseHeaders(this.code, this.response.length());
-        OutputStream os = this.httpExchange.getResponseBody();
-        os.write(this.response.getBytes());
+    private void sendExchange(HttpExchange httpExchange, int code, String response) throws IOException {
+        httpExchange.sendResponseHeaders(code, response.length());
+        OutputStream os = httpExchange.getResponseBody();
+        os.write(response.getBytes());
         os.close();
     }
 
-    private void redirect() throws IOException {
-        this.httpExchange.getResponseHeaders().add("Location", this.location);
-        this.httpExchange.sendResponseHeaders(303, 0);
+    private void redirect(HttpExchange httpExchange, String location) throws IOException {
+        httpExchange.getResponseHeaders().add("Location", location);
+        httpExchange.sendResponseHeaders(303, 0);
     }
 }
