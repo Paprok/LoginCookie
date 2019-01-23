@@ -13,9 +13,10 @@ import java.net.URLDecoder;
 import java.util.*;
 
 public class LoginHandler implements HttpHandler {
-    private final String LOGIN_LOCATION = "/";
     private DAOLogin daoLogin;
     private CookieHelper cookieHelper;
+    private HttpExchange httpExchange;
+    private final String LOGIN_LOCATION = "/";
     private final String WELCOME_PAGE_LOCATION = "/welcome";
 
 
@@ -26,40 +27,40 @@ public class LoginHandler implements HttpHandler {
 
     @Override
     public void handle(HttpExchange httpExchange) throws IOException {
+        this.httpExchange = httpExchange;
         String method = httpExchange.getRequestMethod();
-        routeByMethodType(method, httpExchange);
+        routeByMethodType(method);
     }
 
 
-
-    private void routeByMethodType(String method, HttpExchange httpExchange) throws IOException {
+    private void routeByMethodType(String method) throws IOException {
         if (method.equals("GET")) {
-            handleRequestGET(httpExchange);
+            handleRequestGET();
         } else if (method.equals("POST")) {
-            logBasedOnForm(httpExchange);
+            logBasedOnForm();
         }
     }
 
-    private void handleRequestGET(HttpExchange httpExchange) throws IOException {
+    private void handleRequestGET() throws IOException {
         Optional<HttpCookie> cookie = this.cookieHelper.getSessionIdCookie(httpExchange);
         if (cookie.isPresent()) {
-            handlePresentCookie(httpExchange, cookie);
+            handlePresentCookie(cookie);
         } else {
-            sendLoginPage(httpExchange);
+            sendLoginPage();
         }
     }
 
-    private void handlePresentCookie(HttpExchange httpExchange, Optional<HttpCookie> cookie) throws IOException {
+    private void handlePresentCookie(Optional<HttpCookie> cookie) throws IOException {
         String sessionId = this.cookieHelper.getSessionId(cookie);
         try {
             Account account = daoLogin.getAccountBySessionId(sessionId);
-            redirect(httpExchange, this.WELCOME_PAGE_LOCATION);
+            redirect(this.WELCOME_PAGE_LOCATION);
         } catch (NoSuchElementException e) {
-            sendLoginPage(httpExchange);
+            sendLoginPage();
         }
     }
 
-    private void sendLoginPage(HttpExchange httpExchange) throws IOException {
+    private void sendLoginPage() throws IOException {
         String response = "<html><head></head><body>" +
                 "<form method=\"POST\" >\n " +
                 "  Login:<br>\n" +
@@ -72,26 +73,26 @@ public class LoginHandler implements HttpHandler {
                 "</form> " +
                 "</body></html>";
         int code = 200;
-        sendExchange(httpExchange, code, response);
+        sendExchange(code, response);
     }
 
-    private void logBasedOnForm(HttpExchange httpExchange) throws IOException {
-        Map<String, String> inputs = getParsedData(httpExchange);
-        String name = inputs.get("name");
-        String password = inputs.get("password");
-
+    private void logBasedOnForm() throws IOException {
         try {
+            Map<String, String> inputs = getParsedData(httpExchange);
+            String name = inputs.get("name");
+            String password = inputs.get("password");
             Account account = daoLogin.getAccountByNicknameAndPassword(name, password);
-            handleValidUser(httpExchange, account);
-        } catch (NoSuchElementException e) {
-            handleInvalidUser(httpExchange);
+            handleValidUser(account);
+        } catch (NoSuchElementException | UnsupportedEncodingException | IllegalArgumentException e) {
+            handleInvalidUser();
         }
     }
 
-    private Map<String, String> getParsedData(HttpExchange httpExchange) throws IOException {
+    private Map<String, String> getParsedData(HttpExchange httpExchange) throws IOException, IllegalArgumentException {
         String formData = getFormData(httpExchange);
         System.out.println(formData);
-        return parseFormData(formData);
+        Map<String, String> parsedData = parseFormData(formData);
+        return parsedData;
     }
 
     private String getFormData(HttpExchange httpExchange) throws IOException {
@@ -100,44 +101,49 @@ public class LoginHandler implements HttpHandler {
         return br.readLine();
     }
 
-    private void handleValidUser(HttpExchange httpExchange, Account account) throws  IOException{
+    private void handleValidUser(Account account) throws IOException {
         String sessionId = UUID.randomUUID().toString();
         account.setSession_id(sessionId);
         daoLogin.updateAccount(account.getUser_id(), account);
-        createCookie(sessionId, httpExchange);
-        redirect(httpExchange, WELCOME_PAGE_LOCATION);
+        createCookie(sessionId);
+        redirect(WELCOME_PAGE_LOCATION);
     }
 
-    private void createCookie(String sessionId, HttpExchange httpExchange) {
+    private void createCookie(String sessionId) {
         Optional<HttpCookie> cookie = Optional.of(new HttpCookie(cookieHelper.getSESSION_COOKIE_NAME(), sessionId));
         httpExchange.getResponseHeaders().add("Set-Cookie", cookie.get().toString());
     }
 
-    private void handleInvalidUser(HttpExchange httpExchange) throws IOException {
-        redirect(httpExchange, LOGIN_LOCATION);
+    private void handleInvalidUser() throws IOException {
+        redirect(LOGIN_LOCATION);
         System.out.println("Wrong login credentials");
     }
 
-    private static Map<String, String> parseFormData(String formData) throws UnsupportedEncodingException {
+    private static Map<String, String> parseFormData(String formData) throws UnsupportedEncodingException, IllegalArgumentException {
         Map<String, String> map = new HashMap<>();
         String[] pairs = formData.split("&");
         for (String pair : pairs) {
             String[] keyValue = pair.split("=");
             // We have to decode the value because it's urlencoded. see: https://en.wikipedia.org/wiki/POST_(HTTP)#Use_for_submitting_web_forms
-            String value = new URLDecoder().decode(keyValue[1], "UTF-8");
+            String value;
+            if(keyValue.length == 2) {
+                value = new URLDecoder().decode(keyValue[1], "UTF-8");
+            } else {
+                throw new IllegalArgumentException("missing data");
+            }
             map.put(keyValue[0], value);
         }
         return map;
     }
 
-    private void sendExchange(HttpExchange httpExchange, int code, String response) throws IOException {
+    private void sendExchange(int code, String response) throws IOException {
         httpExchange.sendResponseHeaders(code, response.length());
         OutputStream os = httpExchange.getResponseBody();
         os.write(response.getBytes());
         os.close();
     }
 
-    private void redirect(HttpExchange httpExchange, String location) throws IOException {
+    private void redirect(String location) throws IOException {
         httpExchange.getResponseHeaders().add("Location", location);
         httpExchange.sendResponseHeaders(303, 0);
     }
